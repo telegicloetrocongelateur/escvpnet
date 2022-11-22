@@ -1,5 +1,5 @@
 [package]
-name = "espvpnet"
+name = "escvpnet"
 version = "0.1.0"
 authors = ["Télégicloétrocongélateur <telegicloetrocongelateur@gmail.com"]
 edition = "2021"
