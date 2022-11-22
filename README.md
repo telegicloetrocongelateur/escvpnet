@@ -1,5 +1,5 @@
-# espvpnet
-## espvpnet is a Rust library for the ESC/VP.net protocol (EPson Control Video Projector)
+# escvpnet
+## escvpnet is a Rust library for the ESC/VP.net protocol (EPson Control Video Projector)
 
 ### Examples
 
