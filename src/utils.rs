@@ -1,4 +1,6 @@
+use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV4;
 use std::net::ToSocketAddrs;
 use std::net::UdpSocket;
 use std::thread::sleep;
@@ -6,36 +8,30 @@ use std::time::Duration;
 /// Finds ESP/VP.net hosts by sending hello udp packets to a list of socket address.
 /// # Example
 /// ```
-/// let mut addrs: Vec<SocketAddr> = Vec::new();
-/// for i in 0..255 {
-///     addrs.push(SocketAddrV4::new(Ipv4Addr::new(192, 168, 0, i), 3629).into())
-///    }
-///    let up_addrs = discover_hosts("0.0.0.0:3629", &addrs, Some(Duration::from_millis(100)));
+///    let addrs = discover_hosts("0.0.0.0:3629", Some(Duration::from_millis(100)));
 /// println!("{:?}", up_addrs);
 /// ```
 pub fn discover_hosts<A: ToSocketAddrs>(
     addr: A,
-    ips: &[SocketAddr],
     timeout: Option<Duration>,
 ) -> Result<Vec<SocketAddr>, std::io::Error> {
     let socket = UdpSocket::bind(addr)?; // init UDP socket
     socket.set_read_timeout(timeout)?;
+    socket.set_broadcast(true)?;
 
-    let mut up_addrs = Vec::new();
-    for ip in ips {
-        socket.send_to(b"ESC/VP.net\x10\x01\x00\x00\x00\x00", ip)?; // send hello packet to every given addr
-    }
+    let mut addrs = Vec::new();
+        socket.send_to(b"ESC/VP.net\x10\x01\x00\x00\x00\x00", SocketAddrV4::new(Ipv4Addr::new(255, 255, 255, 255), 3629))?; // send hello packet to every given addr
 
     if let Some(timeout) = timeout {
         sleep(timeout); // to be sure hosts have the time to respond
     }
-
+ 
     let mut buf = [0u8; 1024];
     while let Ok((_, ip)) = socket.recv_from(&mut buf) {
-        up_addrs.push(ip)
+        addrs.push(ip)
     }
 
-    Ok(up_addrs)
+    Ok(addrs)
 }
 pub mod commands {
     #![allow(dead_code)]
