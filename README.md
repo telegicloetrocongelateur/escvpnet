@@ -5,11 +5,7 @@
 
 #### Discovering ESC/VP.net hosts
 ```rust
-let mut addrs: Vec<SocketAddr> = Vec::new();
-for i in 0..255 {
-     addrs.push(SocketAddrV4::new(Ipv4Addr::new(192, 168, 0, i), 3629).into()) // generate socket addrs from ip range
-    }
-    let up_addrs = discover_hosts("0.0.0.0:3629", &addrs, Some(Duration::from_millis(100))); // ping hosts and put the up hosts in up_addrs
+    let addrs = discover_hosts("0.0.0.0:3629", &addrs, Some(Duration::from_millis(100))); // ping hosts and put the up hosts in addrs
  println!("{:?}", up_addrs);
  ```
  
