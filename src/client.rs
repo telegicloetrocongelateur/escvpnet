@@ -14,10 +14,10 @@ const BUF_SIZE: usize = 1024;
 /// # Example
 ///
 /// ```
-/// use espvpnet::{ client::Client, protocol::Command, utils::commands::LAMP};
-/// let client = Client::connect("192.168.0.1:3629")?;
+/// use escvpnet::{Client, commands::LAMP, Command};
+/// let mut client = Client::connect("192.168.0.1:3629").expect("Failed to connect to projector");
 /// let command = Command::Get { command: LAMP };
-/// client::send(command)?;
+/// client.send(command).expect("Failed to send command");
 ///
 /// ```
 pub struct Client {
