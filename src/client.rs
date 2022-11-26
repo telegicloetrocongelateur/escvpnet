@@ -47,7 +47,7 @@ impl Client {
 
         let mut buf = Vec::new();
         let mut reader = BufReader::new(&self.stream);
-        reader.read_until(b':', &mut buf)?; 
+        reader.read_until(b':', &mut buf)?;
         Response::try_from(&buf[..])
     }
 

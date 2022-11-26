@@ -18,33 +18,28 @@ impl<'a> TryFrom<&'a str> for Command<'a> {
         if value.is_empty() {
             return Ok(Self::Null);
         }
-        if value
-            .chars()
-            .nth(value.len() - 1)
-            .ok_or(Error::ParseError)?
-            == '?'
-        {
+        if value.chars().nth(value.len() - 1).ok_or(Error::Parse)? == '?' {
             return Ok(Self::Get {
                 command: &value[..value.len() - 1],
             });
         }
         if value.contains(' ') {
             let mut data = value.split(' ');
-            let command = data.next().ok_or(Error::ParseError)?;
-            let parameter = data.next().ok_or(Error::ParseError)?;
+            let command = data.next().ok_or(Error::Parse)?;
+            let parameter = data.next().ok_or(Error::Parse)?;
             return Ok(Self::Set {
                 command,
                 parameter: Parameter::try_from(parameter)?,
             });
         }
-        Err(Error::ParseError)
+        Err(Error::Parse)
     }
 }
 
-impl<'a> Into<Vec<u8>> for Command<'a> {
-    fn into(self) -> Vec<u8> {
-        match self {
-            Self::Set { command, parameter } => {
+impl<'a> From<Command<'a>> for Vec<u8> {
+    fn from(command: Command<'a>) -> Self {
+        match command {
+            Command::Set { command, parameter } => {
                 let mut bytes: Vec<u8> = Vec::new();
                 bytes.extend(command.as_bytes());
                 bytes.push(b' ');
@@ -52,17 +47,37 @@ impl<'a> Into<Vec<u8>> for Command<'a> {
                 bytes.push(b'\r');
                 bytes
             }
-            Self::Get { command } => {
+            Command::Get { command } => {
                 let mut bytes: Vec<u8> = Vec::new();
                 bytes.extend(command.as_bytes());
                 bytes.extend(b"?\r");
                 bytes
             }
-            Self::Null => b"\x0d".to_vec(),
+            Command::Null => b"\x0d".to_vec(),
         }
     }
 }
-
+impl<'a> From<&Command<'a>> for Vec<u8> {
+    fn from(command: &Command<'a>) -> Self {
+        match command {
+            Command::Set { command, parameter } => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.extend(command.as_bytes());
+                bytes.push(b' ');
+                bytes.extend(Into::<Vec<u8>>::into(parameter));
+                bytes.push(b'\r');
+                bytes
+            }
+            Command::Get { command } => {
+                let mut bytes: Vec<u8> = Vec::new();
+                bytes.extend(command.as_bytes());
+                bytes.extend(b"?\r");
+                bytes
+            }
+            Command::Null => b"\x0d".to_vec(),
+        }
+    }
+}
 #[derive(Debug, PartialEq, Eq)]
 pub enum Parameter {
     On,
@@ -85,20 +100,32 @@ impl<'a> TryFrom<&'a str> for Parameter {
             "DEC" => Ok(Self::Decrease),
             "INIT" => Ok(Self::Initialize),
 
-            _ => Err(Error::ParseError),
+            _ => Err(Error::Parse),
         }
     }
 }
 
-impl Into<Vec<u8>> for Parameter {
-    fn into(self) -> Vec<u8> {
-        match self {
-            Self::On => b"ON".to_vec(),
-            Self::Off => b"OFF".to_vec(),
-            Self::Number(n) => n.to_string().as_bytes().to_vec(),
-            Self::Increase => b"INC".to_vec(),
-            Self::Decrease => b"DEC".to_vec(),
-            Self::Initialize => b"INIT".to_vec(),
+impl From<&Parameter> for Vec<u8> {
+    fn from(parameter: &Parameter) -> Self {
+        match parameter {
+            Parameter::On => b"ON".to_vec(),
+            Parameter::Off => b"OFF".to_vec(),
+            Parameter::Number(n) => n.to_string().as_bytes().to_vec(),
+            Parameter::Increase => b"INC".to_vec(),
+            Parameter::Decrease => b"DEC".to_vec(),
+            Parameter::Initialize => b"INIT".to_vec(),
+        }
+    }
+}
+impl From<Parameter> for Vec<u8> {
+    fn from(parameter: Parameter) -> Self {
+        match parameter {
+            Parameter::On => b"ON".to_vec(),
+            Parameter::Off => b"OFF".to_vec(),
+            Parameter::Number(n) => n.to_string().as_bytes().to_vec(),
+            Parameter::Increase => b"INC".to_vec(),
+            Parameter::Decrease => b"DEC".to_vec(),
+            Parameter::Initialize => b"INIT".to_vec(),
         }
     }
 }

@@ -12,7 +12,7 @@ pub enum ProtocolError {
 pub enum Error {
     IO(io::Error),
     Protocol(ProtocolError),
-    ParseError,
+    Parse,
 }
 
 impl From<io::Error> for Error {
