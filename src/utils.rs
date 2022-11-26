@@ -7,8 +7,8 @@ use std::{
 /// Finds ESP/VP.net hosts by sending hello udp packets to a list of socket address.
 /// # Example
 /// ```
-///    let addrs = discover_hosts("0.0.0.0:3629", "255.255.255.255:3629" Some(Duration::from_millis(100)));
-/// println!("{:?}", up_addrs);
+/// use std::time::Duration;
+/// let addrs = escvpnet::discover("0.0.0.0:3629", "255.255.255.255:3629", Some(Duration::from_millis(100)));
 /// ```
 pub fn discover<A: ToSocketAddrs>(
     addr: A,
@@ -21,7 +21,7 @@ pub fn discover<A: ToSocketAddrs>(
     socket.set_broadcast(true)?;
 
     let mut addrs = Vec::new();
-    socket.send_to(b"ESC/VP.net\x10\x01\x00\x00\x00\x00", broadcast_addr)?; // send hello packet to every given addr
+    socket.send_to(b"ESC/VP.net\x10\x01\x00\x00\x00\x00", broadcast_addr)?; // send broadcast hello packet
 
     if let Some(timeout) = timeout {
         sleep(timeout); // to be sure hosts have the time to respond
@@ -65,18 +65,4 @@ pub mod commands {
     pub const TRACKING: &str = "TRACKING";
     pub const SYNC: &str = "SYNC";
     pub const NRS: &str = "NRS";
-
-    pub mod keys {
-        use crate::protocol::Parameter;
-
-        pub const POWER: Parameter = Parameter::Number(1);
-        pub const MENU: Parameter = Parameter::Number(1);
-        pub const HELP: Parameter = Parameter::Number(1);
-        pub const ESC: Parameter = Parameter::Number(1);
-        pub const ENTER: Parameter = Parameter::Number(1);
-        pub const UP: Parameter = Parameter::Number(1);
-        pub const DOWN: Parameter = Parameter::Number(1);
-        pub const LEFT: Parameter = Parameter::Number(1);
-        pub const RIGHT: Parameter = Parameter::Number(1);
-    }
 }
