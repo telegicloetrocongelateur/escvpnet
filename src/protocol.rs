@@ -133,8 +133,14 @@ impl From<Parameter> for Vec<u8> {
 #[derive(Debug, PartialEq, Eq)]
 
 pub struct Response {
-    command: String,
-    parameter: String,
+    pub command: String,
+    pub parameter: String,
+}
+
+impl Response {
+    fn new(command: String, parameter: String) -> Self {
+        Self { command, parameter }
+    }
 }
 
 impl TryFrom<&[u8]> for Response {
