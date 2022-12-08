@@ -1,10 +1,11 @@
-use crate::protocol::*;
 use std::{
-    io::{Cursor, Read, Write},
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket},
+    io::{BufRead, BufReader, Read, Write},
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
 };
-const PROTOCOL_IDENTIFIER: [u8; 10] = *b"ESC/VP.net";
 
+use crate::{
+    packet::PROTOCOL_IDENTIFIER, Command, Error, Header, Identifier, Packet, Response, Status,
+};
 type Result<T> = std::result::Result<T, Error>;
 
 pub trait ReadPacket {
@@ -144,76 +145,35 @@ impl SendPacket for UdpSocket {
     }
 }
 
-#[test]
-fn read_packet() {
-    let mut data = Cursor::new(b"ESC/VP.net\x10\x01\0\0\0\0".to_vec());
-    assert_eq!(
-        data.read_packet().unwrap(),
-        Packet::new(Identifier::Hello, Status::Null, None)
-    );
-    let mut data = Cursor::new(b"ESC/VP.net\x10\x01\0\0\0\x05\x01\x010123456789abcdef\x02\x010123456789abcdef\x03\x00\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x04\x00\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x05\x21\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec());
-    assert_eq!(
-        data.read_packet().unwrap(),
-        Packet::new(
-            Identifier::Hello,
-            Status::Null,
-            Some(vec![
-                Header::Password(Some("0123456789abcdef".to_string())),
-                Header::NewPassword(Some("0123456789abcdef".to_string())),
-                Header::ProjectorName(None),
-                Header::IMType(0),
-                Header::ProjectorCommandType,
-            ])
-        )
-    );
+pub trait SendCommand {
+    fn send_command(&mut self, command: Command) -> Result<Response>;
 }
-#[test]
-fn write_packet() {
-    let mut data = Cursor::new(Vec::<u8>::new());
-    data.write_packet(Packet::new(
-        Identifier::Hello,
-        Status::Null,
-        Some(vec![
-            Header::Password(Some("0123456789abcdef".to_string())),
-            Header::NewPassword(Some("0123456789abcdef".to_string())),
-            Header::ProjectorName(None),
-            Header::IMType(0),
-            Header::ProjectorCommandType,
-        ]),
-    ))
-    .unwrap();
 
-    assert_eq!(data.into_inner(), b"ESC/VP.net\x10\x01\0\0\0\x05\x01\x010123456789abcdef\x02\x010123456789abcdef\x03\x00\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x04\x00\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x05\x21\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec())
-}
-#[test]
-fn recv_write_packet() {
-    let mut socket = UdpSocket::bind("127.0.0.1:58478").unwrap();
-    /*
-    let mut buf = [0; 1024];
-    let (_, addr) = socket.recv_from(&mut buf).unwrap();
-    */
+impl<T: Read + Write> SendCommand for T {
+    fn send_command(&mut self, command: Command) -> Result<Response> {
+        match command {
+            Command::Set { command, parameter } => {
+                self.write_all(command.as_bytes())?;
+                self.write_all(b" ")?;
+                self.write_all(parameter.as_bytes())?;
+            }
+            Command::Get { command } => {
+                self.write_all(command.as_bytes())?;
+                self.write_all(b"?")?;
+            }
+            Command::Null => {}
+        }
+        self.write_all(b"\r")?;
+        self.flush()?;
 
-    let packet1 = Packet::new(
-        Identifier::Hello,
-        Status::Null,
-        Some(vec![
-            Header::Password(Some("0123456789abcdef".to_string())),
-            Header::NewPassword(Some("0123456789abcdef".to_string())),
-            Header::ProjectorName(None),
-            Header::IMType(0),
-            Header::ProjectorCommandType,
-        ]),
-    );
-    socket.set_broadcast(true);
-    socket
-        .send_packet_to(packet1.clone(), "255.255.255.255:58478")
-        .unwrap();
+        let mut reader = BufReader::new(self);
+        let mut buf = Vec::new();
+        reader.read_until(b':', &mut buf)?;
+        let data = String::from_utf8_lossy(&buf);
+        let mut parts = data.split('=');
+        let command = parts.next().ok_or(Error::ParseError)?;
+        let parameter = parts.next().ok_or(Error::ParseError)?;
 
-    let (packet2, addr) = socket.recv_packet_from().unwrap();
-
-    assert_eq!(packet1, packet2);
-    assert_eq!(
-        addr,
-        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 58478))
-    )
+        Ok(Response::new(command.to_string(), parameter.to_string()))
+    }
 }

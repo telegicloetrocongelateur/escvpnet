@@ -1,14 +1,18 @@
-use crate::*;
-use io::*;
+use crate::{
+    Command, Error, Header, Identifier, Packet, ReadPacket, ReceivePacket, Response, SendCommand,
+    Status, WritePacket,
+};
 use std::{
-    io::Write,
     net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket},
     time::Duration,
 };
+
+type Result<T> = std::result::Result<T, Error>;
+
 pub struct Client {
     stream: TcpStream,
 }
-type Result<T> = std::result::Result<T, Error>;
+
 pub const HELLO: [u8; 16] = *b"ESC/VP.net\x10\x01\x00\x00\x00\x00";
 
 impl Client {
@@ -52,5 +56,9 @@ impl Client {
             projectors.push((addr, None));
         }
         Ok(projectors)
+    }
+
+    pub fn send(&mut self, command: Command) -> Result<Response> {
+        self.stream.send_command(command)
     }
 }

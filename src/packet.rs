@@ -2,7 +2,7 @@ use super::{Error, Header, Identifier, Status};
 use std::io::Read;
 use std::net::{SocketAddr, UdpSocket};
 
-const PROTOCOL_IDENTIFIER: [u8; 10] = *b"ESC/VP.net";
+pub const PROTOCOL_IDENTIFIER: [u8; 10] = *b"ESC/VP.net";
 
 type Result<T> = std::result::Result<T, super::Error>;
 
