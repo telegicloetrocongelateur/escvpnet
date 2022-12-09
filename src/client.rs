@@ -5,6 +5,7 @@ use crate::{
 use std::{
     net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket},
     time::Duration,
+    thread::sleep,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -41,6 +42,11 @@ impl Client {
 
         socket.send_to(&HELLO, broadcast)?;
         let mut projectors = Vec::new();
+        
+        if let Some(timeout) = timeout {
+
+            sleep(timeout);
+        } 
         'a: while let Ok((packet, addr)) = socket.recv_packet_from() {
             if packet.status == Status::Null {
                 continue;
