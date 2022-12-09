@@ -80,7 +80,7 @@ pub trait ReceivePacket {
 impl ReceivePacket for UdpSocket {
     fn recv_packet_from(&self) -> Result<(Packet, SocketAddr)> {
         let mut buf = [0; 1024];
-        let (_, addr) = self.recv_from(&mut buf).unwrap();
+        let (_, addr) = self.recv_from(&mut buf)?;
 
         if buf[..10] != b"ESC/VP.net"[..] {
             return Err(Error::ParseError);
