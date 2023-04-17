@@ -1,10 +1,10 @@
 [package]
 name = "escvpnet"
-version = "0.2.3"
+version = "0.3.0"
 authors = ["Télégicloétrocongélateur <telegicloetrocongelateur@gmail.com"]
 edition = "2021"
-rust-version = "1.56.0"
-description = "ESC/VP.net protocol client library"
+rust-version = "1.68.2"
+description = "ESC/VP.net protocol library"
 license = "MIT"
 license-file = "LICENSE.txt"
 repository = "https://github.com/telegicloetroncongelateur/escvpnet"

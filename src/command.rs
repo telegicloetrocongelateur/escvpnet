@@ -65,6 +65,16 @@ pub struct Response {
     value: String,
 }
 
+impl Response {
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
+    }
+
+    pub fn value(&self) -> &str {
+        self.value.as_ref()
+    }
+}
+
 impl<R: Read> DecodeFrom<R> for Response {
     type Error = crate::Error;
     fn decode_from(reader: &mut R) -> Result<Self, Self::Error> {
