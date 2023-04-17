@@ -1,141 +1,159 @@
-use super::Error;
+use std::io::{Read, Write};
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-
-pub enum Header {
-    Password(Option<String>),
-    NewPassword(Option<String>),
-    ProjectorName(Option<String>),
-    IMType(u8),
-    ProjectorCommandType,
+use crate::{error::ErrorKind, io::*, Result};
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
+pub struct Header {
+    identifier: HeaderIdentifier,
+    attribute: u8,
+    information: String,
 }
 
 impl Header {
-    pub const SIZE: usize = 18;
-}
+    pub fn new(identifier: HeaderIdentifier, attribute: u8, information: String) -> Result<Self> {
+        if information.len() > 16 {
+            return Err(crate::Error::new(
+                ErrorKind::Encoding,
+                "Header length is too big".to_string(),
+            ));
+        }
+        Ok(Self {
+            identifier,
+            attribute,
+            information,
+        })
+    }
 
-impl From<Header> for [u8; 18] {
-    fn from(header: Header) -> Self {
-        match header {
-            Header::Password(password) => match password {
-                None => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                Some(password) => {
-                    let mut array = [1; 18];
-                    array[2..].copy_from_slice(password.as_bytes());
-                    array
-                }
-            },
-            Header::NewPassword(name) => match name {
-                None => [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                Some(name) => {
-                    let mut array = [2; 18];
-                    array[1] = 1;
-                    array[2..].copy_from_slice(name.as_bytes());
-                    array
-                }
-            },
-            Header::ProjectorName(name) => match name {
-                None => [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                Some(name) => {
-                    let mut array = [3; 18];
-                    array[1] = 1;
-                    array[2..].copy_from_slice(name.as_bytes());
-                    array
-                }
-            },
-            Header::IMType(n) => [4, n, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            Header::ProjectorCommandType => [5, 33, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        }
+    pub fn identifier(&self) -> &HeaderIdentifier {
+        &self.identifier
     }
-}
-impl TryFrom<[u8; 18]> for Header {
-    type Error = Error;
-    fn try_from(value: [u8; 18]) -> Result<Self, Self::Error> {
-        match value[0] {
-            1 => match value[1] {
-                0 => Ok(Self::Password(None)),
-                1 => Ok(Self::Password(Some(
-                    String::from_utf8_lossy(&value[2..18]).to_string(),
-                ))),
-                _ => Err(Error::ParseError),
-            },
-            2 => match value[1] {
-                0 => Ok(Self::NewPassword(None)),
-                1 => Ok(Self::NewPassword(Some(
-                    String::from_utf8_lossy(&value[2..18]).to_string(),
-                ))),
-                _ => Err(Error::ParseError),
-            },
-            3 => match value[1] {
-                0 => Ok(Self::ProjectorName(None)),
-                1 => Ok(Self::ProjectorName(Some(
-                    String::from_utf8_lossy(&value[2..18]).to_string(),
-                ))),
-                _ => Err(Error::ParseError),
-            },
-            4 => Ok(Self::IMType(value[1])),
-            5 => Ok(Self::ProjectorCommandType),
-            _ => Err(Self::Error::ParseError),
-        }
+
+    pub fn attribute(&self) -> u8 {
+        self.attribute
     }
-}
-impl TryFrom<&[u8]> for Header {
-    type Error = Error;
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let attr_value: u8 = *value.get(1).ok_or(Self::Error::ParseError)?;
-        let information = value.get(2..18).ok_or(Self::Error::ParseError)?;
-        match value.first().ok_or(Self::Error::ParseError)? {
-            1 => match attr_value {
-                0 => Ok(Self::Password(None)),
-                1 => Ok(Self::Password(Some(
-                    String::from_utf8_lossy(information).to_string(),
-                ))),
-                _ => Err(Error::ParseError),
-            },
-            2 => match attr_value {
-                0 => Ok(Self::NewPassword(None)),
-                1 => Ok(Self::NewPassword(Some(
-                    String::from_utf8_lossy(information).to_string(),
-                ))),
-                _ => Err(Error::ParseError),
-            },
-            3 => match attr_value {
-                0 => Ok(Self::ProjectorName(None)),
-                1 => Ok(Self::ProjectorName(Some(
-                    String::from_utf8_lossy(information).to_string(),
-                ))),
-                _ => Err(Error::ParseError),
-            },
-            4 => Ok(Self::IMType(value[1])),
-            5 => Ok(Self::ProjectorCommandType),
-            _ => Err(Self::Error::ParseError),
-        }
+
+    pub fn information(&self) -> &str {
+        self.information.as_ref()
     }
 }
 
-#[test]
-fn bytes_to_header() {
-    assert_eq!(
-        Header::try_from(*b"\x01\x010123456789ABCDEF").unwrap(),
-        Header::Password(Some("0123456789ABCDEF".to_string()))
-    );
-    assert_eq!(
-        Header::try_from(*b"\x01\x00\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0").unwrap(),
-        Header::Password(None)
-    );
+impl Length for Header {
+    const LENGTH: usize = 18;
+}
 
-    assert_eq!(
-        Header::try_from(*b"\x02\x00\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0").unwrap(),
-        Header::NewPassword(None)
-    );
+impl Decode for Header {
+    type Error = crate::Error;
+    fn decode(data: [u8; Self::LENGTH]) -> Result<Self> {
+        let identifier = HeaderIdentifier::decode(data[0..1].try_into().unwrap())?;
+        let attribute = data[1];
+        let information = String::from_utf8(data[2..].to_vec())?;
+        Ok(Self {
+            identifier,
+            attribute,
+            information,
+        })
+    }
+}
+impl<R: Read> DecodeFrom<R> for Vec<Header> {
+    type Error = crate::Error;
+    fn decode_from(reader: &mut R) -> Result<Self> {
+        let len = u8::decode_from(reader)? as usize;
+        let mut packet_categories = Vec::with_capacity(len);
+        for _ in 0..len {
+            packet_categories.push(Header::decode_from(reader)?)
+        }
+        Ok(packet_categories)
+    }
+}
+impl<W: Write> EncodeTo<W> for Vec<Header> {
+    type Error = crate::Error;
+    fn encode_to(self, writer: &mut W) -> Result<usize> {
+        let len: u8 = self.len().try_into()?;
+        len.encode_to(writer)?;
 
-    assert_eq!(
-        Header::try_from(*b"\x04\x0a\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0").unwrap(),
-        Header::IMType(10)
-    );
+        for header in self {
+            header.encode_to(writer)?;
+        }
+        Ok(1 + len as usize * Header::LENGTH)
+    }
+}
 
-    assert_eq!(
-        Header::try_from(*b"\x05\x21\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0").unwrap(),
-        Header::ProjectorCommandType
-    )
+impl Encode for Header {
+    type Error = crate::Error;
+    fn encode(self) -> Result<[u8; Self::LENGTH]> {
+        let mut data = [0; Self::LENGTH];
+        data[0] = self.identifier.encode()?[0];
+        data[1] = self.attribute;
+        data[2..Self::LENGTH].copy_from_slice(self.information.as_bytes());
+        Ok(data)
+    }
+}
+#[derive(PartialEq, PartialOrd, Debug, Clone)]
+pub enum HeaderIdentifier {
+    Null = 0, // Reserved
+    Password = 1,
+    NewPassword = 2,
+    ProjectorName = 3,
+    ImType = 4,
+    ProjectorCommandType = 5,
+}
+
+impl Length for HeaderIdentifier {
+    const LENGTH: usize = 1;
+}
+
+impl Decode for HeaderIdentifier {
+    type Error = crate::Error;
+    fn decode(data: [u8; Self::LENGTH]) -> Result<Self> {
+        use HeaderIdentifier::*;
+        match data[0] {
+            0 => Ok(Null), // Reserved,
+            1 => Ok(Password),
+            2 => Ok(NewPassword),
+            3 => Ok(ProjectorName),
+            4 => Ok(ImType),
+            5 => Ok(ProjectorCommandType),
+            _ => Err(crate::Error::new(
+                crate::error::ErrorKind::Decoding,
+                "Failed to decode a header identifier".to_string(),
+            )),
+        }
+    }
+}
+
+impl Encode for HeaderIdentifier {
+    type Error = crate::Error;
+    fn encode(self) -> Result<[u8; Self::LENGTH]> {
+        Ok([self as u8])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header() {
+        let data = *b"\0\00123456789abcdef";
+        let header = Header {
+            identifier: HeaderIdentifier::Null,
+            attribute: 0,
+            information: "0123456789abcdef".to_string(),
+        };
+        assert_eq!(header, Header::decode(data).unwrap())
+    }
+
+    #[test]
+    fn header_identifier() {
+        let order = [
+            HeaderIdentifier::Null, // Reserved
+            HeaderIdentifier::Password,
+            HeaderIdentifier::NewPassword,
+            HeaderIdentifier::ProjectorName,
+            HeaderIdentifier::ImType,
+            HeaderIdentifier::ProjectorCommandType,
+        ];
+        for (i, hd) in order.iter().enumerate() {
+            assert_eq!(*hd, HeaderIdentifier::decode([i as u8]).unwrap())
+        }
+    }
 }

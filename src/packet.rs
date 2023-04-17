@@ -1,208 +1,219 @@
-use super::{Error, Header, Identifier, Status};
-use std::io::Read;
-use std::net::{SocketAddr, UdpSocket};
+use std::io::Write;
 
+use crate::io::*;
 pub const PROTOCOL_IDENTIFIER: [u8; 10] = *b"ESC/VP.net";
 
-type Result<T> = std::result::Result<T, super::Error>;
+pub const VERSION_IDENTIFIER: u8 = 0x10;
+use crate::header::*;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Packet {
-    pub identifier: Identifier,
+    pub category: PacketCategory,
     pub status: Status,
-
-    pub headers: Option<Vec<Header>>,
+    pub headers: Vec<Header>,
 }
 
 impl Packet {
-    pub fn new(identifier: Identifier, status: Status, headers: Option<Vec<Header>>) -> Self {
+    pub fn new(category: PacketCategory, status: Status, headers: Vec<Header>) -> Self {
         Self {
-            identifier,
+            category,
             status,
             headers,
         }
     }
-    pub fn status(&self) -> Status {
-        self.status.clone()
-    }
-}
 
-impl From<Packet> for Vec<u8> {
-    fn from(request: Packet) -> Self {
-        let mut data = Vec::with_capacity(16);
-        data.extend_from_slice(&PROTOCOL_IDENTIFIER);
-        data.push(0x10);
-        data.push(request.identifier.into());
-        data.extend_from_slice(&[0, 0]);
-        data.push(request.status.into());
-        data.push(match request.headers {
-            None => 0,
-            Some(ref headers) => headers.len() as u8,
-        });
-        if let Some(test) = request.headers {
-            for header in test {
-                data.extend_from_slice(&std::convert::Into::<[u8; 18]>::into(header))
-            }
-        }
-        data
-    }
-}
-
-impl TryFrom<[u8; 16]> for Packet {
-    type Error = Error;
-    fn try_from(value: [u8; 16]) -> Result<Self> {
-        Ok(Self {
-            identifier: Identifier::try_from(value[11])?,
-            status: Status::try_from(value[14])?,
-            headers: match value.get(15).ok_or(Error::ParseError)? {
-                0 => None,
-                n => Some(Vec::with_capacity(*n as usize)),
-            },
-        })
-    }
-}
-
-impl TryFrom<&[u8]> for Packet {
-    type Error = Error;
-    fn try_from(value: &[u8]) -> Result<Self> {
-        if value[0..10] != PROTOCOL_IDENTIFIER {
-            return Err(Self::Error::ParseError);
-        }
-
-        let identifier = Identifier::try_from(value[11])?;
-        let status = Status::try_from(value[14])?;
-        let num_headers = value[15] as usize;
-        let headers: Option<Vec<Header>> = match num_headers {
-            0 => None,
-            _ => {
-                let mut headers = Vec::with_capacity(num_headers);
-                for i in 0..num_headers {
-                    let data = &value[16 + i * 18..16 + (i + 1) * 18];
-                    println!("{:?}", data);
-                    headers.push(Header::try_from(data)?);
-                }
-                Some(headers)
-            }
-        };
-        Ok(Self {
-            identifier,
-            status,
-            headers,
-        })
-    }
-}
-
-pub const HELLO: [u8; 16] = *b"ESC/VP.net\x10\x01\x00\x00\x00\x00";
-
-#[test]
-fn packet_from_bytes() {
-    let data =
-        b"ESC/VP.net\x10\x01\x00\x00\x20\x01\x03\x01Room 1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-
-    assert_eq!(
-        Packet::try_from(&data[..]).unwrap(),
-        Packet {
-            identifier: Identifier::Hello,
-            status: Status::Ok,
-            headers: Some(vec![Header::ProjectorName(Some(
-                "Room 1\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_string()
-            ))])
-        }
-    );
-
-    let data = *b"ESC/VP.net\x10\x01\x00\x00\x00\x00";
-    assert_eq!(
-        Packet::try_from(data).unwrap(),
-        Packet {
-            identifier: Identifier::Hello,
+    pub fn new_request(category: PacketCategory, headers: Vec<Header>) -> Self {
+        Self {
+            category,
             status: Status::Null,
-            headers: None
+            headers,
         }
-    )
-}
-pub trait ReadPacket {
-    fn read_packet(&mut self) -> Result<Packet>;
+    }
+
+    pub fn status_as_result(self) -> Result<Self, crate::Error> {
+        match self.status {
+            Status::Ok | Status::Null => Ok(self),
+            _ => Err(self.status.into()),
+        }
+    }
+
+    pub fn headers(&self) -> &[Header] {
+        self.headers.as_ref()
+    }
+
+    pub fn status(&self) -> &Status {
+        &self.status
+    }
+
+    pub fn category(&self) -> &PacketCategory {
+        &self.category
+    }
 }
 
-impl<R: Read> ReadPacket for R {
-    fn read_packet(&mut self) -> Result<Packet> {
-        let mut buf = [0; 16];
+impl<R: std::io::Read> DecodeFrom<R> for Packet {
+    type Error = crate::Error;
+    fn decode_from(reader: &mut R) -> Result<Self, Self::Error> {
+        let protocol_identifier = <[u8; 10]>::decode_from(reader)?;
 
-        self.read_exact(&mut buf)?;
-        let identifier = Identifier::try_from(buf[11])?;
-        let status = Status::try_from(buf[14])?;
-        let num_headers = buf[15] as usize;
-        Ok(Packet {
-            identifier,
+        if protocol_identifier != PROTOCOL_IDENTIFIER {
+            return Err(crate::Error::new(
+                crate::error::ErrorKind::Decoding,
+                "Bad protocol identifier".to_string(),
+            ));
+        }
+        let version_identifier = u8::decode_from(reader)?;
+
+        if version_identifier != VERSION_IDENTIFIER {
+            return Err(crate::Error::new(
+                crate::error::ErrorKind::Decoding,
+                "Bad protocol version".to_string(),
+            ));
+        }
+
+        let category = PacketCategory::decode_from(reader)?;
+
+        <[u8; 2]>::decode_from(reader)?; // Reserved
+
+        let status = Status::decode_from(reader)?;
+
+        let headers = Vec::<Header>::decode_from(reader)?;
+
+        Ok(Self {
+            category,
             status,
-            headers: match num_headers {
-                0 => None,
-                _ => {
-                    let mut headers = Vec::with_capacity(num_headers);
-                    for _ in 0..num_headers {
-                        let mut header = [0; 18];
-                        self.read_exact(&mut header)?;
-                        headers.push(Header::try_from(header)?);
-                    }
-                    Some(headers)
-                }
-            },
+            headers,
         })
     }
 }
-pub trait ReceivePacket {
-    fn recv_packet_from(&self) -> Result<(Packet, SocketAddr)>;
-    fn recv_packet(&self) -> Result<Packet>;
+
+impl<W: Write> EncodeTo<W> for Packet {
+    type Error = crate::Error;
+    fn encode_to(self, writer: &mut W) -> Result<usize, Self::Error> {
+        let mut len = 13;
+        writer.write_all(&PROTOCOL_IDENTIFIER)?;
+        writer.write_all(&[VERSION_IDENTIFIER])?;
+        len += self.category.encode_to(writer)?;
+        writer.write_all(&[0, 0])?;
+        len += self.status.encode_to(writer)?;
+        len += self.headers.encode_to(writer)?;
+        Ok(len)
+    }
+}
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
+
+pub enum PacketCategory {
+    Null = 0, //Reserved
+    Hello = 1,
+    Password = 2,
+    Connect = 3,
 }
 
-const BUF_SIZE: usize = 512;
+impl Length for PacketCategory {
+    const LENGTH: usize = 1;
+}
 
-impl ReceivePacket for UdpSocket {
-    fn recv_packet_from(&self) -> Result<(Packet, SocketAddr)> {
-        let mut buf = [0; BUF_SIZE];
-        let (_, addr) = self.recv_from(&mut buf)?;
+impl Decode for PacketCategory {
+    type Error = crate::Error;
+    fn decode(data: [u8; Self::LENGTH]) -> Result<Self, Self::Error> {
+        use PacketCategory::*;
 
-        let identifier = Identifier::try_from(buf[11])?;
-        let status = Status::try_from(buf[14])?;
-        let num_headers = buf[15];
-        Ok((
-            Packet {
-                identifier,
-                status,
-                headers: match num_headers {
-                    0 => None,
-                    _ => {
-                        let mut headers = Vec::with_capacity(num_headers as usize);
-                        for data in buf[16..].chunks_exact(18) {
-                            headers.push(Header::try_from(data)?);
-                        }
-                        Some(headers)
-                    }
-                },
-            },
-            addr,
-        ))
+        match data[0] {
+            0 => Ok(Null),
+            1 => Ok(Hello),
+            2 => Ok(Password),
+            3 => Ok(Connect),
+            _ => Err(crate::Error::new(
+                crate::error::ErrorKind::Decoding,
+                "Failed to decode a packet category".to_string(),
+            )),
+        }
     }
+}
+impl Encode for PacketCategory {
+    type Error = crate::Error;
+    fn encode(self) -> Result<[u8; Self::LENGTH], Self::Error> {
+        Ok([self as u8])
+    }
+}
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
+pub enum Status {
+    Null = 0x00, // For requests
+    Ok = 0x20,
+    BadRequest = 0x40,
+    Unauthorized = 0x41,
+    Forbidden = 0x43,
+    RequestNotAllowed = 0x45,
+    ServiceUnavailable = 0x53,
+    VersionNotSupported = 0x55,
+}
 
-    fn recv_packet(&self) -> Result<Packet> {
-        let mut buf = [0; BUF_SIZE];
-        self.recv(&mut buf)?;
-        let identifier = Identifier::try_from(buf[11])?;
-        let status = Status::try_from(buf[14])?;
-        let num_headers = buf[15];
-        Ok(Packet {
-            identifier,
-            status,
-            headers: match num_headers {
-                0 => None,
-                _ => {
-                    let mut headers = Vec::with_capacity(num_headers as usize);
-                    for data in buf[16..].chunks_exact(18) {
-                        headers.push(Header::try_from(data)?);
-                    }
-                    Some(headers)
-                }
-            },
-        })
+impl Length for Status {
+    const LENGTH: usize = 1;
+}
+
+impl Decode for Status {
+    type Error = crate::Error;
+    fn decode(data: [u8; Self::LENGTH]) -> Result<Self, Self::Error> {
+        match data[0] {
+            0x00 => Ok(Self::Null),
+            0x20 => Ok(Self::Ok),
+            0x40 => Ok(Self::BadRequest),
+            0x41 => Ok(Self::Unauthorized),
+            0x43 => Ok(Self::Forbidden),
+            0x45 => Ok(Self::RequestNotAllowed),
+            0x53 => Ok(Self::ServiceUnavailable),
+            0x55 => Ok(Self::VersionNotSupported),
+            _ => Err(crate::Error::new(
+                crate::error::ErrorKind::Decoding,
+                "Failed to decode a status".to_string(),
+            )),
+        }
+    }
+}
+
+impl Encode for Status {
+    type Error = crate::Error;
+    fn encode(self) -> Result<[u8; Self::LENGTH], Self::Error> {
+        Ok([self as u8])
+    }
+}
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+    #[test]
+    fn packet() {
+        let data = b"ESC/VP.net\x10\x01\0\0\0\0";
+        let mut reader = Cursor::new(data);
+        let decoded_packet = Packet::decode_from(&mut reader).unwrap();
+        let packet = Packet::new_request(PacketCategory::Hello, vec![]);
+        let mut encoded_packet = Vec::new();
+        packet.clone().encode_to(&mut encoded_packet).unwrap();
+        assert_eq!(decoded_packet, packet);
+        assert_eq!(data, encoded_packet.as_slice());
+    }
+    #[test]
+    fn packet_headers() {
+        let data = b"ESC/VP.net\x10\x02\0\0\0\x06\0\x050123456789abcdef\x01\x04123456789abcdef0\x02\x0323456789abcdef01\x03\x023456789abcdef012\x04\x01456789abcdef0123\x05\x0056789abcdef01234";
+        let mut reader = Cursor::new(data);
+        use HeaderIdentifier::*;
+
+        let packet = Packet::new_request(
+            PacketCategory::Password,
+            vec![
+                Header::new(Null, 5, "0123456789abcdef".to_string()).unwrap(),
+                Header::new(Password, 4, "123456789abcdef0".to_string()).unwrap(),
+                Header::new(NewPassword, 3, "23456789abcdef01".to_string()).unwrap(),
+                Header::new(ProjectorName, 2, "3456789abcdef012".to_string()).unwrap(),
+                Header::new(ImType, 1, "456789abcdef0123".to_string()).unwrap(),
+                Header::new(ProjectorCommandType, 0, "56789abcdef01234".to_string()).unwrap(),
+            ],
+        );
+        let decoded_packet = Packet::decode_from(&mut reader).unwrap();
+        assert_eq!(decoded_packet, packet);
+        let mut encoded_packet = vec![];
+        packet.encode_to(&mut encoded_packet).unwrap();
+        assert_eq!(encoded_packet.as_slice(), data)
     }
 }
