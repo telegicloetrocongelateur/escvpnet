@@ -1,4 +1,8 @@
-use std::io::Write;
+use std::pin::Pin;
+
+use async_trait::async_trait;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 
 use crate::io::*;
 pub const PROTOCOL_IDENTIFIER: [u8; 10] = *b"ESC/VP.net";
@@ -49,11 +53,12 @@ impl Packet {
         &self.category
     }
 }
+#[async_trait]
 
-impl<R: std::io::Read> DecodeFrom<R> for Packet {
+impl<R: AsyncReadExt + Send> DecodeFrom<R> for Packet {
     type Error = crate::Error;
-    fn decode_from(reader: &mut R) -> Result<Self, Self::Error> {
-        let protocol_identifier = <[u8; 10]>::decode_from(reader)?;
+    async fn decode_from(reader: &mut Pin<&mut R>) -> Result<Self, Self::Error> {
+        let protocol_identifier = <[u8; 10]>::decode_from(reader).await?;
 
         if protocol_identifier != PROTOCOL_IDENTIFIER {
             return Err(crate::Error::new(
@@ -61,7 +66,7 @@ impl<R: std::io::Read> DecodeFrom<R> for Packet {
                 "Bad protocol identifier".to_string(),
             ));
         }
-        let version_identifier = u8::decode_from(reader)?;
+        let version_identifier = u8::decode_from(reader).await?;
 
         if version_identifier != VERSION_IDENTIFIER {
             return Err(crate::Error::new(
@@ -70,13 +75,13 @@ impl<R: std::io::Read> DecodeFrom<R> for Packet {
             ));
         }
 
-        let category = PacketCategory::decode_from(reader)?;
+        let category = PacketCategory::decode_from(reader).await?;
 
-        <[u8; 2]>::decode_from(reader)?; // Reserved
+        <[u8; 2]>::decode_from(reader).await?; // Reserved
 
-        let status = Status::decode_from(reader)?;
+        let status = Status::decode_from(reader).await?;
 
-        let headers = Vec::<Header>::decode_from(reader)?;
+        let headers = Vec::<Header>::decode_from(reader).await?;
 
         Ok(Self {
             category,
@@ -85,17 +90,18 @@ impl<R: std::io::Read> DecodeFrom<R> for Packet {
         })
     }
 }
+#[async_trait]
 
-impl<W: Write> EncodeTo<W> for Packet {
+impl<W: AsyncWriteExt + Send> EncodeTo<W> for Packet {
     type Error = crate::Error;
-    fn encode_to(self, writer: &mut W) -> Result<usize, Self::Error> {
+    async fn encode_to(self, writer: &mut Pin<&mut W>) -> Result<usize, Self::Error> {
         let mut len = 13;
-        writer.write_all(&PROTOCOL_IDENTIFIER)?;
-        writer.write_all(&[VERSION_IDENTIFIER])?;
-        len += self.category.encode_to(writer)?;
-        writer.write_all(&[0, 0])?;
-        len += self.status.encode_to(writer)?;
-        len += self.headers.encode_to(writer)?;
+        writer.write_all(&PROTOCOL_IDENTIFIER).await?;
+        writer.write_all(&[VERSION_IDENTIFIER]).await?;
+        len += self.category.encode_to(writer).await?;
+        writer.write_all(&[0, 0]).await?;
+        len += self.status.encode_to(writer).await?;
+        len += self.headers.encode_to(writer).await?;
         Ok(len)
     }
 }
@@ -182,21 +188,24 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
-    #[test]
-    fn packet() {
-        let data = b"ESC/VP.net\x10\x01\0\0\0\0";
-        let mut reader = Cursor::new(data);
-        let decoded_packet = Packet::decode_from(&mut reader).unwrap();
+    #[tokio::test]
+    async fn packet() {
+        let mut data = &b"ESC/VP.net\x10\x01\0\0\0\0"[..];
+        let mut reader = Pin::new(&mut data);
+        let decoded_packet = Packet::decode_from(&mut reader).await.unwrap();
         let packet = Packet::new_request(PacketCategory::Hello, vec![]);
-        let mut encoded_packet = Vec::new();
-        packet.clone().encode_to(&mut encoded_packet).unwrap();
+        let mut buf = Vec::new();
+        let mut encoded_packet = Pin::new(&mut buf);
+
+        packet.clone().encode_to(&mut encoded_packet).await.unwrap();
         assert_eq!(decoded_packet, packet);
         assert_eq!(data, encoded_packet.as_slice());
     }
-    #[test]
-    fn packet_headers() {
+    #[tokio::test]
+    async fn packet_headers() {
         let data = b"ESC/VP.net\x10\x02\0\0\0\x06\0\x050123456789abcdef\x01\x04123456789abcdef0\x02\x0323456789abcdef01\x03\x023456789abcdef012\x04\x01456789abcdef0123\x05\x0056789abcdef01234";
-        let mut reader = Cursor::new(data);
+        let mut cursor = Cursor::new(data);
+        let mut reader = Pin::new(&mut cursor);
         use HeaderIdentifier::*;
 
         let packet = Packet::new_request(
@@ -210,10 +219,11 @@ mod tests {
                 Header::new(ProjectorCommandType, 0, "56789abcdef01234".to_string()).unwrap(),
             ],
         );
-        let decoded_packet = Packet::decode_from(&mut reader).unwrap();
+        let decoded_packet = Packet::decode_from(&mut reader).await.unwrap();
         assert_eq!(decoded_packet, packet);
-        let mut encoded_packet = vec![];
-        packet.encode_to(&mut encoded_packet).unwrap();
+        let mut buf = vec![];
+        let mut encoded_packet = Pin::new(&mut buf);
+        packet.encode_to(&mut encoded_packet).await.unwrap();
         assert_eq!(encoded_packet.as_slice(), data)
     }
 }

@@ -1,7 +1,6 @@
 use std::{
-    io::Cursor,
-    net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket},
-    time::Duration,
+    net::{SocketAddr},
+    time::Duration, pin::Pin,
 };
 
 use crate::{
@@ -9,6 +8,12 @@ use crate::{
     io::{DecodeFrom, EncodeTo},
     packet::{Packet, PacketCategory, Status},
     Result,
+};
+use tokio::{
+    io::{BufReader, BufWriter},
+    net::{TcpStream, UdpSocket,ToSocketAddrs},
+    io::{ AsyncWriteExt}
+
 };
 
 const HELLO_PACKET: [u8; 16] = [
@@ -26,33 +31,34 @@ const CONNECT_PACKET: Packet = Packet {
     status: Status::Null,
     headers: vec![],
 };
-const KEEP_ALIVE_PACKET: Packet = Packet {
-    category: PacketCategory::Hello,
-    status: Status::Null,
-    headers: vec![],
-};
 
 pub struct Client {
     stream: TcpStream,
 }
 
 impl Client {
-    pub fn discover<A: ToSocketAddrs>(
+    pub async fn discover<A: ToSocketAddrs>(
         bind_addr: A,
         broadcast_addr: A,
-        timeout: Option<Duration>,
+        timeout: Duration,
     ) -> Result<Vec<Projector>> {
-        let socket = UdpSocket::bind(bind_addr)?;
+        let socket = UdpSocket::bind(bind_addr).await?;
 
-        socket.set_read_timeout(timeout)?;
-        socket.set_write_timeout(timeout)?;
         socket.set_broadcast(true)?;
 
-        socket.send_to(&HELLO_PACKET, broadcast_addr)?;
+        socket.send_to(&HELLO_PACKET, broadcast_addr).await?;
         let mut projectors = Vec::new();
         let mut buf = [0; BUF_SIZE];
-        while let Ok((n, addr)) = socket.recv_from(&mut buf) {
-            let packet = Packet::decode_from(&mut Cursor::new(&buf[..n]))?; // handle result
+
+
+        while let Ok((n, addr)) = match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
+            Ok(result) => result,
+            Err(_) => return Ok(projectors)
+        }
+           
+{
+
+            let packet = Packet::decode_from(&mut Pin::new(&mut &buf[..n])).await?; // handle result
             let name = packet
                 .headers
                 .iter()
@@ -63,34 +69,46 @@ impl Client {
         Ok(projectors)
     }
 
-    pub fn connect<A: ToSocketAddrs>(addr: A, password: Option<String>) -> Result<Self> {
-        let mut stream = TcpStream::connect(addr)?;
-        let packet = match password {
-            None => CONNECT_PACKET,
-            Some(password) => {
-                let mut packet = CONNECT_PACKET;
-                packet
-                    .headers
-                    .push(Header::new(HeaderIdentifier::Password, 1, password)?);
-                packet
-            }
-        };
 
-        packet.encode_to(&mut stream)?;
 
-        Packet::decode_from(&mut stream)?.status_as_result()?;
+    pub async fn connect<A: ToSocketAddrs>(addr: A, password: Option<String>) -> Result<Self> {
+        let mut stream = TcpStream::connect(addr).await?;
+        {
+            let (reader, writer) = stream.split();
+            let mut writer = BufWriter::new(writer);
+            let mut pinned_writer = Pin::new(&mut writer);
+            let mut reader = BufReader::new(reader);
+            let mut pinned_reader = Pin::new(&mut reader);
+
+            let packet = match password {
+                None => CONNECT_PACKET,
+                Some(password) => {
+                    let mut packet = CONNECT_PACKET;
+                    packet
+                        .headers
+                        .push(Header::new(HeaderIdentifier::Password, 1, password)?);
+                    packet
+                }
+            };
+
+            packet.encode_to(&mut pinned_writer).await?;
+            writer.flush().await?;
+            Packet::decode_from(&mut pinned_reader).await?.status_as_result()?;
+        }
         Ok(Self { stream })
     }
 
-    pub fn keep_alive(&mut self) -> Result<()> {
-        KEEP_ALIVE_PACKET.encode_to(&mut self.stream)?;
-        Packet::decode_from(&mut self.stream)?.status_as_result()?;
-        Ok(())
-    }
 
-    pub fn send_packet(&mut self, packet: Packet) -> Result<Packet> {
-        packet.encode_to(&mut self.stream)?;
-        Packet::decode_from(&mut self.stream)
+
+    pub async fn send_packet(&mut self, packet: Packet) -> Result<Packet> {
+        let (reader, writer) = self.stream.split();
+        let mut writer = BufWriter::new(writer);
+        let mut pinned_writer = Pin::new(&mut writer);
+        let mut reader = BufReader::new(reader);
+        let mut pinned_reader = Pin::new(&mut reader);
+        packet.encode_to(&mut pinned_writer).await?;
+
+        Packet::decode_from(&mut pinned_reader).await
     }
 }
 
@@ -108,9 +126,5 @@ impl Projector {
     }
 }
 
-impl ToSocketAddrs for Projector {
-    type Iter = std::option::IntoIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> std::io::Result<Self::Iter> {
-        Ok(Some(self.addr).into_iter())
-    }
-}
+
+

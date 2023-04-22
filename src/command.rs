@@ -1,4 +1,7 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::{ pin::Pin};
+
+use async_trait::async_trait;
+use tokio::io::{AsyncReadExt, AsyncBufReadExt, BufReader, AsyncWriteExt};
 
 use crate::{
     error::ErrorKind,
@@ -9,13 +12,13 @@ pub enum Command {
     Get { name: String },
     Set { name: String, value: String },
 }
-
-impl<R: Read> DecodeFrom<R> for Command {
+#[async_trait]
+impl<R: AsyncReadExt+Send> DecodeFrom<R> for Command {
     type Error = crate::Error;
-    fn decode_from(reader: &mut R) -> Result<Self, Self::Error> {
+    async fn decode_from(reader: &mut Pin<&mut R>) -> Result<Self, Self::Error> {
         let mut reader = BufReader::new(reader);
         let mut buf = String::new();
-        reader.read_line(&mut buf)?;
+        reader.read_line(&mut buf).await?;
 
         if buf.contains("?") {
             let mut parts = buf.split('?');
@@ -43,10 +46,10 @@ impl<R: Read> DecodeFrom<R> for Command {
         }
     }
 }
-
-impl<W: Write> EncodeTo<W> for Command {
+#[async_trait]
+impl<W: AsyncWriteExt+Send> EncodeTo<W> for Command {
     type Error = crate::Error;
-    fn encode_to(self, writer: &mut W) -> Result<usize, Self::Error> {
+    async fn encode_to(self, writer: &mut Pin<&mut W>) -> Result<usize, Self::Error> {
         let command = match self {
             Self::Get { name } => {
                 format!("{name}?\n")
@@ -55,7 +58,7 @@ impl<W: Write> EncodeTo<W> for Command {
                 format!("{name} {value}\n")
             }
         };
-        writer.write_all(command.as_bytes())?;
+        writer.write_all(command.as_bytes()).await?;
         Ok(command.len())
     }
 }
@@ -74,13 +77,13 @@ impl Response {
         self.value.as_ref()
     }
 }
-
-impl<R: Read> DecodeFrom<R> for Response {
+#[async_trait]
+impl<R: AsyncReadExt+ Send> DecodeFrom<R> for Response {
     type Error = crate::Error;
-    fn decode_from(reader: &mut R) -> Result<Self, Self::Error> {
+    async fn decode_from(reader: &mut Pin<&mut R>) -> Result<Self, Self::Error> {
         let mut buf_reader = BufReader::new(reader);
         let mut buf = String::new();
-        buf_reader.read_line(&mut buf)?;
+        buf_reader.read_line(&mut buf).await?;
         let mut parts = buf.split("=");
         let name = parts
             .next()
