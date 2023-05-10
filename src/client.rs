@@ -1,7 +1,4 @@
-use std::{
-    net::{SocketAddr},
-    time::Duration, pin::Pin,
-};
+use std::{net::SocketAddr, pin::Pin, time::Duration};
 
 use crate::{
     header::{Header, HeaderIdentifier},
@@ -10,10 +7,9 @@ use crate::{
     Result,
 };
 use tokio::{
+    io::AsyncWriteExt,
     io::{BufReader, BufWriter},
-    net::{TcpStream, UdpSocket,ToSocketAddrs},
-    io::{ AsyncWriteExt}
-
+    net::{TcpStream, ToSocketAddrs, UdpSocket},
 };
 
 const HELLO_PACKET: [u8; 16] = [
@@ -50,14 +46,12 @@ impl Client {
         let mut projectors = Vec::new();
         let mut buf = [0; BUF_SIZE];
 
-
-        while let Ok((n, addr)) = match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
-            Ok(result) => result,
-            Err(_) => return Ok(projectors)
-        }
-           
-{
-
+        while let Ok((n, addr)) =
+            match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
+                Ok(result) => result,
+                Err(_) => return Ok(projectors),
+            }
+        {
             let packet = Packet::decode_from(&mut Pin::new(&mut &buf[..n])).await?; // handle result
             let name = packet
                 .headers
@@ -69,10 +63,19 @@ impl Client {
         Ok(projectors)
     }
 
-
-
-    pub async fn connect<A: ToSocketAddrs>(addr: A, password: Option<String>) -> Result<Self> {
-        let mut stream = TcpStream::connect(addr).await?;
+    pub async fn connect<A: ToSocketAddrs>(
+        addr: A,
+        password: Option<String>,
+        timeout: Duration,
+    ) -> Result<Self> {
+        let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+            .await
+            .map_err(|_| {
+                crate::Error::new(
+                    crate::error::ErrorKind::IO(std::io::ErrorKind::TimedOut),
+                    "Timed out".to_string(),
+                )
+            })??;
         {
             let (reader, writer) = stream.split();
             let mut writer = BufWriter::new(writer);
@@ -93,12 +96,12 @@ impl Client {
 
             packet.encode_to(&mut pinned_writer).await?;
             writer.flush().await?;
-            Packet::decode_from(&mut pinned_reader).await?.status_as_result()?;
+            Packet::decode_from(&mut pinned_reader)
+                .await?
+                .status_as_result()?;
         }
         Ok(Self { stream })
     }
-
-
 
     pub async fn send_packet(&mut self, packet: Packet) -> Result<Packet> {
         let (reader, writer) = self.stream.split();
@@ -125,6 +128,3 @@ impl Projector {
         self.name.clone()
     }
 }
-
-
-

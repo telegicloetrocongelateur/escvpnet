@@ -191,6 +191,7 @@ mod tests {
     #[tokio::test]
     async fn packet() {
         let mut data = &b"ESC/VP.net\x10\x01\0\0\0\0"[..];
+        let data2 = &b"ESC/VP.net\x10\x01\0\0\0\0"[..];
         let mut reader = Pin::new(&mut data);
         let decoded_packet = Packet::decode_from(&mut reader).await.unwrap();
         let packet = Packet::new_request(PacketCategory::Hello, vec![]);
@@ -199,7 +200,7 @@ mod tests {
 
         packet.clone().encode_to(&mut encoded_packet).await.unwrap();
         assert_eq!(decoded_packet, packet);
-        assert_eq!(data, encoded_packet.as_slice());
+        assert_eq!(data2, encoded_packet.as_slice());
     }
     #[tokio::test]
     async fn packet_headers() {
