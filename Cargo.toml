@@ -6,7 +6,7 @@ edition = "2021"
 rust-version = "1.68.2"
 description = "ESC/VP.net protocol library"
 license = "MIT"
-repository = "https://github.com/telegicloetroncongelateur/escvpnet"
+repository = "https://github.com/telegicloetrocongelateur/escvpnet"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [tests]
