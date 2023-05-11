@@ -21,7 +21,7 @@ impl Error {
         self.message.clone()
     }
 }
-
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum ErrorKind {
     Decoding,

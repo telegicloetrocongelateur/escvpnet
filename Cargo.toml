@@ -1,13 +1,19 @@
 [package]
 name = "escvpnet"
-version = "0.3.0"
+version = "0.3.2"
 authors = ["Télégicloétrocongélateur <telegicloetrocongelateur@gmail.com"]
 edition = "2021"
 rust-version = "1.68.2"
 description = "ESC/VP.net protocol library"
 license = "MIT"
-license-file = "LICENSE.txt"
-repository = "https://github.com/telegicloetroncongelateur/escvpnet"
+repository = "https://github.com/telegicloetrocongelateur/escvpnet"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [tests]
+
+[dependencies]
+async-trait = "0.1.68"
+tokio = { version = "1.27.0", features = ["net", "io-util"] }
+
+[dev-dependencies]
+tokio = { version = "1.27.0", features = ["net", "io-util", "test-util", "macros"] }

@@ -1,4 +1,9 @@
-use std::io::{Read, Write};
+use std::{
+    pin::Pin,
+};
+
+use async_trait::async_trait;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{error::ErrorKind, io::*, Result};
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
@@ -53,25 +58,28 @@ impl Decode for Header {
         })
     }
 }
-impl<R: Read> DecodeFrom<R> for Vec<Header> {
+#[async_trait]
+impl<R: AsyncReadExt + Send> DecodeFrom<R> for Vec<Header> {
     type Error = crate::Error;
-    fn decode_from(reader: &mut R) -> Result<Self> {
-        let len = u8::decode_from(reader)? as usize;
+    async fn decode_from(reader: &mut Pin<&mut R>) -> Result<Self> {
+        let len = u8::decode_from(reader).await? as usize;
         let mut packet_categories = Vec::with_capacity(len);
         for _ in 0..len {
-            packet_categories.push(Header::decode_from(reader)?)
+            packet_categories.push(Header::decode_from(reader).await?)
         }
         Ok(packet_categories)
     }
 }
-impl<W: Write> EncodeTo<W> for Vec<Header> {
+#[async_trait]
+
+impl<W: AsyncWriteExt + Send> EncodeTo<W> for Vec<Header> {
     type Error = crate::Error;
-    fn encode_to(self, writer: &mut W) -> Result<usize> {
+    async fn encode_to(self, writer: &mut Pin<&mut W>) -> Result<usize> {
         let len: u8 = self.len().try_into()?;
-        len.encode_to(writer)?;
+        len.encode_to(writer).await?;
 
         for header in self {
-            header.encode_to(writer)?;
+            header.encode_to(writer).await?;
         }
         Ok(1 + len as usize * Header::LENGTH)
     }

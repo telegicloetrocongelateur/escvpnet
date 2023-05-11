@@ -13,5 +13,4 @@ pub type Result<T> = std::result::Result<T, crate::Error>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 }
